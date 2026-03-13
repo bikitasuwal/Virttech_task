@@ -1,96 +1,172 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import { Post } from "../../type";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import type { Post } from "../../type";
 import AddPostForm from "../../component/AddPostForm";
 
-type LocalPost = Post & { createdAt: string };
+interface LocalPost extends Post {
+  createdAt?: string;
+}
 
 export default function UserPostsPage() {
   const params = useParams<{ id: string }>();
-  const userId = params.id;
+  const userId = Array.isArray(params.id) ? params.id[0] : params.id;
   const parsedUserId = Number(userId);
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [apiIsLoading, setApiIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPosts = async (id: string) => {
-    try {
-      setApiIsLoading(true);
-      setError(null);
-
-      const res = await fetch(
-        `https://jsonplaceholder.typicode.com/posts?userId=${id}`,
-      );
-      if (!res.ok) throw new Error("Failed to fetch posts");
-
-      const apiPosts: Post[] = await res.json();
-
-      const raw = localStorage.getItem("newPosts");
-      let allLocalPosts: LocalPost[] = [];
-
-      if (raw) {
-        try {
-          allLocalPosts = JSON.parse(raw);
-        } catch {
-          allLocalPosts = [];
-        }
-      }
-
-      const localPostsForUser = allLocalPosts.filter(
-        (p) => p.userId === Number(id),
-      );
-
-      // local posts first, then API posts
-      setPosts([...localPostsForUser, ...apiPosts]);
-    } catch {
-      setError("Something went wrong");
-    } finally {
-      setApiIsLoading(false);
-    }
-  };
+  const [currentPage, setCurrentPage] = useState(1);
+  const postsPerPage = 5;
 
   useEffect(() => {
     if (!userId) return;
     fetchPosts(userId);
   }, [userId]);
 
+  const fetchPosts = async (id: string) => {
+    try {
+      setApiIsLoading(true);
+      setError(null);
+
+      const response = await fetch(
+        `https://jsonplaceholder.typicode.com/posts?userId=${id}`,
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch posts");
+      }
+
+      const apiPosts: Post[] = await response.json();
+
+      let allLocalPosts: LocalPost[] = [];
+      const localPostsRaw = localStorage.getItem("newPosts");
+
+      if (localPostsRaw) {
+        try {
+          allLocalPosts = JSON.parse(localPostsRaw);
+        } catch {
+          allLocalPosts = [];
+        }
+      }
+
+      const localPostsForUser = allLocalPosts.filter(
+        (post) => post.userId === Number(id),
+      );
+
+      // local posts first, then API posts
+      setPosts([...localPostsForUser, ...apiPosts]);
+    } catch (err) {
+      setError("Something went wrong");
+      console.error(err);
+    } finally {
+      setApiIsLoading(false);
+    }
+  };
+
   const handlePostAdded = () => {
     if (!userId) return;
     fetchPosts(userId);
   };
 
-  if (apiIsLoading) return <div style={{ padding: 20 }}>Loading posts...</div>;
-  if (error) return <div style={{ padding: 20, color: "red" }}>{error}</div>;
+  if (apiIsLoading) {
+    return <div style={{ padding: 20 }}>Loading posts...</div>;
+  }
+
+  if (error) {
+    return <div style={{ padding: 20, color: "red" }}>{error}</div>;
+  }
+
+  const safeTotalPages = Math.max(1, Math.ceil(posts.length / postsPerPage));
+  const startIndex = (currentPage - 1) * postsPerPage;
+  const paginatedPosts = posts.slice(startIndex, startIndex + postsPerPage);
+
+  const goToPreviousPage = () => {
+    setCurrentPage((previousPage) => Math.max(previousPage - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage((previousPage) =>
+      Math.min(previousPage + 1, safeTotalPages),
+    );
+  };
+
+  const goToPage = (page: number) => {
+    setCurrentPage(page);
+  };
 
   return (
-    <main style={{ padding: 20 }}>
+    <div style={{ padding: 20 }}>
       <Link href="/">
-        <button style={{ marginBottom: 20 }}>Back</button>
+        <button style={{ marginBottom: 20 }}>← Back to Users</button>
       </Link>
 
-      <h1>User {userId} Posts</h1>
+      <h1>User Posts</h1>
 
       <AddPostForm userId={parsedUserId} onPostAdded={handlePostAdded} />
 
+      <p style={{ marginBottom: 20 }}>
+        Showing {posts.length} posts (Page {currentPage} of {safeTotalPages})
+      </p>
+
       <div>
-        {posts.map((post) => (
+        {paginatedPosts.map((post) => (
           <div
             key={post.id}
             style={{
-              border: "1px solid black",
+              padding: 20,
+              marginBottom: 15,
               borderRadius: 8,
-              padding: 16,
+              border: "1px solid black",
             }}
           >
-            <div style={{ fontWeight: 700 }}>{post.title}</div>
-            <p style={{ marginTop: 8 }}>{post.body}</p>
+            <h3>{post.title}</h3>
+            <p style={{ marginTop: 10 }}>{post.body}</p>
           </div>
         ))}
       </div>
-    </main>
+
+      {safeTotalPages > 1 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginTop: 20,
+            flexWrap: "wrap",
+          }}
+        >
+          <button onClick={goToPreviousPage} disabled={currentPage === 1}>
+            Previous
+          </button>
+
+          {Array.from({ length: safeTotalPages }, (_, index) => {
+            const pageNumber = index + 1;
+            return (
+              <button
+                key={pageNumber}
+                onClick={() => goToPage(pageNumber)}
+                style={{
+                  fontWeight: pageNumber === currentPage ? "bold" : "normal",
+                  textDecoration:
+                    pageNumber === currentPage ? "underline" : "none",
+                }}
+              >
+                {pageNumber}
+              </button>
+            );
+          })}
+
+          <button
+            onClick={goToNextPage}
+            disabled={currentPage === safeTotalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
